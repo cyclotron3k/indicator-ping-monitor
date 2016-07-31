@@ -1,0 +1,84 @@
+#!/usr/bin/env ruby
+# encoding: UTF-8
+
+require 'ruby-libappindicator'
+
+# icons = {
+# 	good:    '/usr/share/icons/Humanity-Dark/status/24/network-idle.svg',
+# 	ok:      '/usr/share/icons/Humanity-Dark/status/24/network-transmit.svg',
+# 	slow:    '/usr/share/icons/Humanity-Dark/status/24/network-offline.svg',
+# 	error:   '/usr/share/icons/Humanity-Dark/status/24/network-error.svg',
+# 	loading: '/usr/share/icons/Humanity-Dark/status/24/ubuntuone-client-updating.svg'
+# 	paused:  '/usr/share/icons/Humanity/actions/24/media-playback-pause.svg'
+# }
+
+@paused = true
+
+@icons = {
+	good:    '/usr/share/icons/Humanity/status/24/user-available.svg',
+	ok:      '/usr/share/icons/Humanity/status/24/user-idle.svg',
+	slow:    '/usr/share/icons/Humanity/status/24/user-idle.svg',
+	error:   '/usr/share/icons/Humanity/status/24/user-busy.svg',
+	loading: '/usr/share/icons/Humanity/status/24/ubuntuone-client-updating.svg',
+	paused:  '/usr/share/icons/Humanity/actions/24/media-playback-pause.svg'
+}
+
+@limits = [
+	[10,   :good],
+	[100,  :ok],
+	[1000, :slow] # update the '-W1' timeout if you change this
+	# ...and anything else is an error
+]
+
+@ai = AppIndicator::AppIndicator.new("test", "indicator-messages", AppIndicator::Category::APPLICATION_STATUS)
+@ai.set_status AppIndicator::Status::ACTIVE
+@ai.set_icon @icons[:loading]
+
+def menu_item(label, &block)
+	Gtk::MenuItem.new(label).tap do |item|
+		item.signal_connect('activate', &block)
+	end
+end
+
+def build_menu
+	@ai.set_menu(Gtk::Menu.new.tap do |menu|
+		if @paused
+			menu.append menu_item("Resume") {
+				@ai.set_icon @icons[:loading]
+				start_timer
+			}
+		else
+			menu.append menu_item("Pause") {
+				@ai.set_icon @icons[:paused]
+				@paused = true
+				build_menu
+			}
+		end
+
+		menu.append Gtk::SeparatorMenuItem.new
+		menu.append menu_item('Quit') { Gtk.main_quit }
+		menu.show_all
+	end)
+end
+
+def start_timer
+	return unless @paused
+	@paused = false
+	build_menu
+	GLib::Timeout.add_seconds(2) do
+		if @paused
+			false
+		else
+			status = if /([\d\.]+)\/\1\/\1\/0.000 ms/ =~ `ping google.com.au -c1 -W1 -q`.lines.last
+				duration = $1.to_f
+				found = @limits.find { |x| x.first > duration }
+				found.last unless found.nil?
+			end || :error
+			@ai.set_icon @icons[status]
+			true # returning false cancels the timer
+		end
+	end
+end
+start_timer
+
+Gtk.main
